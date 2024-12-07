@@ -1,24 +1,22 @@
 #include <Wire.h>
 #include <LCD_I2C.h> 
 
-// Initialize I2C LCD (address, columns, rows)
 LCD_I2C lcd(0x27, 16, 2); 
 
-// Button Pins
-const int button1 = 2; // Navigation Button
-const int button2 = 3; // Trigger Button
+// Pin Definitions
+const int joystickX = A0; // Joystick horizontal (X-axis)
+const int triggerButton = 3; // Trigger button
 
 // Variables
-int menuIndex = 0;
-const char* menuItems[] = {"Digital Dice", "Coin Toss", "Stopwatch", "Time & Date"};
-const int totalItems = 4;
+int currentProgram = 0; // 0 = Dice, 1 = Coin Toss, 2 = Stopwatch, 3 = Time & Date
+const int totalPrograms = 4;
+
+unsigned long lastJoystickTime = 0;
+unsigned long lastTriggerTime = 0;
+const unsigned long debounceDelay = 200;
 
 unsigned long stopwatchStart = 0;
-bool stopwatchRunning = false;
-
-// Debounce settings
-unsigned long lastDebounceTime = 0;
-const unsigned long debounceDelay = 50;
+bool stopwatchRunning = false; // Tracks whether stopwatch is running
 
 String dateTime = "No Data"; // Placeholder for received date/time
 
@@ -26,26 +24,39 @@ void setup() {
   lcd.begin();        // Initialize LCD
   lcd.backlight();    // Turn on backlight
 
-  pinMode(button1, INPUT_PULLUP);
-  pinMode(button2, INPUT_PULLUP);
-  
+  pinMode(joystickX, INPUT);
+  pinMode(triggerButton, INPUT_PULLUP);
+
   Serial.begin(9600);
-  lcd.print("Project Ready!");
-  delay(2000);
+
   lcd.clear();
+  lcd.print("Dice: Roll it!"); // Start with Dice program
 }
 
 void loop() {
-  // Read buttons with debouncing
-  if (digitalRead(button1) == LOW && millis() - lastDebounceTime > debounceDelay) {
-    lastDebounceTime = millis();
-    menuIndex = (menuIndex + 1) % totalItems;
-    displayMenu();
+  unsigned long currentTime = millis();
+
+  // Handle Joystick Movement (Program Navigation)
+  int joystickValue = analogRead(joystickX);
+  if (currentTime - lastJoystickTime > debounceDelay) {
+    if (joystickValue < 400) { // Joystick moved left (backward program)
+      lastJoystickTime = currentTime;
+      previousProgram();
+    } else if (joystickValue > 600) { // Joystick moved right (forward program)
+      lastJoystickTime = currentTime;
+      nextProgram();
+    }
   }
 
-  if (digitalRead(button2) == LOW && millis() - lastDebounceTime > debounceDelay) {
-    lastDebounceTime = millis();
-    triggerAction();
+  // Handle Trigger Button
+  if (digitalRead(triggerButton) == LOW && (currentTime - lastTriggerTime > debounceDelay)) {
+    lastTriggerTime = currentTime;
+    triggerProgram();
+  }
+
+  // Continuously update stopwatch display if running
+  if (stopwatchRunning && currentProgram == 2) {
+    updateStopwatchDisplay();
   }
 
   // Read serial input for date and time
@@ -54,17 +65,37 @@ void loop() {
   }
 }
 
-void displayMenu() {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Menu:");
-  lcd.setCursor(0, 1);
-  lcd.print(menuItems[menuIndex]);
+void nextProgram() {
+  currentProgram = (currentProgram + 1) % totalPrograms; // Go to next program
+  updateLCD();
 }
 
-void triggerAction() {
+void previousProgram() {
+  currentProgram = (currentProgram - 1 + totalPrograms) % totalPrograms; // Go to previous program
+  updateLCD();
+}
+
+void updateLCD() {
   lcd.clear();
-  switch (menuIndex) {
+  switch (currentProgram) {
+    case 0:
+      lcd.print("Dice: Roll it!");
+      break;
+    case 1:
+      lcd.print("Coin Toss");
+      break;
+    case 2:
+      lcd.print("Stopwatch");
+      break;
+    case 3:
+      lcd.print("Time & Date");
+      break;
+  }
+}
+
+void triggerProgram() {
+  lcd.clear();
+  switch (currentProgram) {
     case 0:
       digitalDice();
       break;
@@ -72,7 +103,7 @@ void triggerAction() {
       coinToss();
       break;
     case 2:
-      stopwatch();
+      toggleStopwatch();
       break;
     case 3:
       displayTimeAndDate();
@@ -88,7 +119,7 @@ void digitalDice() {
   lcd.print("Dice: ");
   lcd.print(dice);
   delay(2000);
-  displayMenu();
+  updateLCD();
 }
 
 void coinToss() {
@@ -99,31 +130,49 @@ void coinToss() {
   lcd.print("Result: ");
   lcd.print(toss == 0 ? "Heads" : "Tails");
   delay(2000);
-  displayMenu();
+  updateLCD();
 }
 
-void stopwatch() {
+void toggleStopwatch() {
   if (!stopwatchRunning) {
-    lcd.print("Stopwatch On");
+    // Start the stopwatch
     stopwatchStart = millis();
     stopwatchRunning = true;
+    lcd.print("Stopwatch Started");
+    delay(1000);
   } else {
+    // Stop the stopwatch and display elapsed time
+    stopwatchRunning = false;
     unsigned long elapsedTime = millis() - stopwatchStart;
     lcd.clear();
-    lcd.print("Time: ");
+    lcd.print("Elapsed Time:");
+    lcd.setCursor(0, 1);
     lcd.print(elapsedTime / 1000);
     lcd.print("s");
-    stopwatchRunning = false;
+    delay(3000);
+
+    // Reset stopwatch
+    stopwatchStart = 0;
+    lcd.clear();
+    lcd.print("Stopwatch Reset");
     delay(2000);
   }
-  displayMenu();
+  updateLCD();
+}
+
+void updateStopwatchDisplay() {
+  lcd.clear();
+  unsigned long elapsedTime = millis() - stopwatchStart;
+  lcd.print("Time: ");
+  lcd.print(elapsedTime / 1000);
+  lcd.print("s");
+  delay(200);
 }
 
 void displayTimeAndDate() {
-  lcd.clear();
-  lcd.print("Time/Date:");
+  lcd.print("Time & Date:");
   lcd.setCursor(0, 1);
   lcd.print(dateTime);
   delay(3000);
-  displayMenu();
+  updateLCD();
 }
